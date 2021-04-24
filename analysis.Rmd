@@ -71,7 +71,6 @@ homicide$Victim.Race <- relevel(homicide$Victim.Race, ref = "White")
 ```
 
 
-
 ```{r}
 set.seed(123)
 smp_size <- floor(0.70 * nrow(homicide))
@@ -82,6 +81,7 @@ test <- homicide[-train_ind, ]
 ```
 
 ## Logistic Regression 
+
 ```{r}
 library(stats)
 library(broom)
@@ -89,11 +89,11 @@ library(knitr)
 library(tidyr)
 library(kableExtra)
 
-glm.fit <- glm(Crime.Solved ~ Victim.Age + Victim.Sex + Victim.Race + Weapon + Death.Penalty, data = train,
+homicide_logistic <- glm(Crime.Solved ~ Victim.Age + Victim.Sex + Victim.Race + Weapon + Death.Penalty, data = train,
                family = "binomial")
 
 
-glm.fit %>%
+homicide_logistic %>%
   tidy() %>%
   kable(format = "markdown", digits = 3)
 ```
@@ -102,12 +102,12 @@ glm.fit %>%
 
 
 ```{r}
-glm.probs <- predict(glm.fit, newdata = select(test, -Crime.Solved), type = "response")
+logistic_prob_pred <- predict(homicide_logistic, newdata = select(test, -Crime.Solved), type = "response")
 
-glm.pred <- rep("No", 188802)
-glm.pred[glm.probs > 0.5] <- "Yes"
+logistic_pred <- rep("No", 188802)
+logistic_pred[logistic_prob_pred > 0.5] <- "Yes"
 
-lr_accuracy <- mean(glm.pred == test["Crime.Solved"])
+logistic_accuracy <- mean(logistic_pred == test["Crime.Solved"])
 ```
 
 
@@ -129,51 +129,58 @@ print(homicide_rf)
 ```
 
 
-
 ```{r}
-pred_rf <- predict(homicide_rf, newdata = select(test, -Crime.Solved), type = "response")
+rf_pred <- predict(homicide_rf, newdata = select(test, -Crime.Solved), type = "response")
 
 test <- test %>%
-  mutate(pred_rf = pred_rf)
+  mutate(rf_pred = rf_pred)
 
-rf_accuracy <- mean(test["pred_rf"] == test["Crime.Solved"])
+rf_accuracy <- mean(test["rf_pred"] == test["Crime.Solved"])
 
 ```
 
 ```{r}
 # Variable Importance
 importance <- importance(homicide_rf)
-
-varImpPlot(homicide_rf)
+varImpPlot(homicide_rf, main = "Importance of Random Forest Variables", 
+           bg = "skyblue", cex = 1, pch = 22)
 ```
 
 ### ROC Curves
 
 ```{r}
 library(pROC)
-
-prob_pred_rf <- predict(homicide_rf, newdata = select(test, -Crime.Solved), type = "prob")
-pred_lr <- predict(glm.fit, newdata = select(test, -Crime.Solved), type = "response")
+rf_prob_pred <- predict(homicide_rf, newdata = select(test, -Crime.Solved), type = "prob")
 
 ROC_rf <- roc(test$Crime.Solved,
-           prob_pred_rf[,2])
-ROC_lr <- roc(test$Crime.Solved,
-          pred_lr)
+           rf_prob_pred[,2])
+ROC_logistic <- roc(test$Crime.Solved,
+          logistic_prob_pred)
 ```
 
 
 ```{r}
-ggroc(list(RandomForest = ROC_rf, LogisticRegression = ROC_lr), legacy.axes = T)+
+ggroc(list(RandomForest = ROC_rf, LogisticRegression = ROC_logistic), legacy.axes = T, size = 1)+
 geom_abline(slope = 1 ,intercept = 0) + # add identity line
 theme(
 panel.background = element_blank(), 
-axis.title.x = element_text(size =14, face = 'bold'),
-axis.title.y = element_text(size =14, face = 'bold'),
-panel.border = element_rect(size = 2, fill = NA), 
-axis.text.x = element_text(size = 12, face ='bold'),
-axis.text.y = element_text(size = 12, face ='bold')) +
+axis.title.x = element_text(size =12),
+axis.title.y = element_text(size =12),
+panel.border = element_rect(size = 1, fill = NA), 
+axis.text.x = element_text(size = 12),
+axis.text.y = element_text(size = 12)) +
 xlab('100% - Specificity') +
 ylab('100% - Sensitivity') +
+labs(title = "ROC for Random Forest vs. Logistic Regression Model") +
 scale_x_continuous(breaks = seq(0,1,0.25), labels = seq(0,1,0.25) * 100) + 
 scale_y_continuous(breaks = seq(0,1,0.25), labels = seq(0,1,0.25) * 100)
 ```
+
+
+```{r}
+# calculate AUC values
+auc(ROC_rf)
+auc(ROC_logistic)
+```
+
+
