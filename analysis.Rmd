@@ -1,0 +1,179 @@
+---
+title: "analysis"
+author: "Maria Henriquez"
+date: "4/7/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+## Loading Data and Adding Dealth Penalty
+
+```{r}
+homicide <- read.csv("homicide.csv")
+```
+
+```{r}
+homicide <- homicide %>%
+  filter(Crime.Type == "Murder or Manslaughter")
+
+states_death_penalty <- 
+c("Alabama","Arizona","Arkansas","California","Colorado","Florida","Georgia","Idaho","Indiana","Kansas","Kentucky","Louisiana","Mississippi","Missouri","Montana","Nebraska","Nevada","New Hampshire","North Carolina","Ohio","Oklahoma","Oregon","Pennsylvania", "South Carolina","South Dakota","Tennessee","Texas","Utah","Virginia","Washington","Wyoming", "Delaware")
+
+states_no_death_penatly <- c("Alaska", "Hawaii", "Iowa", "Maine", "Michigan","Minnesota", "North Dakota", "Vermont", "West Virginia", "Wisconsin")
+
+states_ambiguous <- c("Connecticut", "Illinois", "Maryland",
+                      "Massachusetts", 
+                      "New Jersey", "New Mexico", "New York", "Rhode Island")
+
+homicide <- homicide %>%
+  mutate(
+    Death.Penalty = case_when(
+      State %in% states_death_penalty ~ "Yes",
+      State == "Connecticut" & Year >= 2012 ~ "Yes",
+      State == "Illinois" & Year >= 2011 ~ "Yes",
+      State == "Maryland" & Year >= 2013 ~ "Yes",
+      State == "Massachusetts" & Year >= 1984 ~ "Yes",
+      State == "New Jersey" & Year >= 2007 ~ "Yes",
+      State == "New Mexico" & Year >= 2009 ~ "Yes",
+      State == "New York" & Year >= 2007 ~ "Yes",
+      State == "Rhode Island" & Year >= 1984 ~ "Yes",
+      TRUE ~ "No"
+    )
+  )
+
+head(homicide)
+```
+```{r}
+summary(homicide$Victim.Race)
+```
+
+## Train-Test Split
+```{r}
+homicide <- drop_na(homicide)
+homicide <- homicide %>%
+  mutate(
+    Victim.Sex = as.factor(Victim.Sex),
+    Victim.Race = as.factor(Victim.Race),
+    Weapon = as.factor(Weapon),
+    Crime.Solved = as.factor(Crime.Solved),
+    Death.Penalty = as.factor(Death.Penalty)
+  )
+
+
+homicide$Victim.Race <- relevel(homicide$Victim.Race, ref = "White")
+```
+
+
+
+```{r}
+set.seed(123)
+smp_size <- floor(0.70 * nrow(homicide))
+train_ind <- sample(seq_len(nrow(homicide)), size = smp_size)
+
+train <- homicide[train_ind, ]
+test <- homicide[-train_ind, ]
+```
+
+## Logistic Regression 
+```{r}
+library(stats)
+library(broom)
+library(knitr)
+library(tidyr)
+library(kableExtra)
+
+glm.fit <- glm(Crime.Solved ~ Victim.Age + Victim.Sex + Victim.Race + Weapon + Death.Penalty, data = train,
+               family = "binomial")
+
+
+glm.fit %>%
+  tidy() %>%
+  kable(format = "markdown", digits = 3)
+```
+
+
+
+
+```{r}
+glm.probs <- predict(glm.fit, newdata = select(test, -Crime.Solved), type = "response")
+
+glm.pred <- rep("No", 188802)
+glm.pred[glm.probs > 0.5] <- "Yes"
+
+lr_accuracy <- mean(glm.pred == test["Crime.Solved"])
+```
+
+
+## Machine Learning
+
+```{r}
+library(randomForest)
+library(caret)
+```
+
+
+```{r}
+# mtry = 2, ntree = 250
+homicide_rf <- randomForest(Crime.Solved ~ Victim.Age + Victim.Sex + Victim.Race + Weapon + Death.Penalty, 
+                            data = train,
+                           ntree = 250, 
+                           importance=TRUE)
+print(homicide_rf)
+```
+
+
+
+```{r}
+pred_rf <- predict(homicide_rf, newdata = select(test, -Crime.Solved), type = "response")
+
+test <- test %>%
+  mutate(pred_rf = pred_rf)
+
+rf_accuracy <- mean(test["pred_rf"] == test["Crime.Solved"])
+
+```
+
+```{r}
+# Variable Importance
+importance <- importance(homicide_rf)
+
+varImpPlot(homicide_rf)
+```
+
+### ROC Curves
+
+```{r}
+library(pROC)
+
+prob_pred_rf <- predict(homicide_rf, newdata = select(test, -Crime.Solved), type = "prob")
+pred_lr <- predict(glm.fit, newdata = select(test, -Crime.Solved), type = "response")
+
+ROC_rf <- roc(test$Crime.Solved,
+           prob_pred_rf[,2])
+ROC_lr <- roc(test$Crime.Solved,
+          pred_lr)
+```
+
+
+```{r}
+ggroc(list(RandomForest = ROC_rf, LogisticRegression = ROC_lr), legacy.axes = T)+
+geom_abline(slope = 1 ,intercept = 0) + # add identity line
+theme(
+panel.background = element_blank(), 
+axis.title.x = element_text(size =14, face = 'bold'),
+axis.title.y = element_text(size =14, face = 'bold'),
+panel.border = element_rect(size = 2, fill = NA), 
+axis.text.x = element_text(size = 12, face ='bold'),
+axis.text.y = element_text(size = 12, face ='bold')) +
+xlab('100% - Specificity') +
+ylab('100% - Sensitivity') +
+scale_x_continuous(breaks = seq(0,1,0.25), labels = seq(0,1,0.25) * 100) + 
+scale_y_continuous(breaks = seq(0,1,0.25), labels = seq(0,1,0.25) * 100)
+```
